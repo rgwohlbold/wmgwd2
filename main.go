@@ -37,10 +37,6 @@ const ArpInterval = 60 * time.Second
 
 const BroadcastAddr = "10.0.1.255"
 
-const MinVni = uint64(1)
-
-const MaxVni = uint64(100)
-
 const InterfacePattern = "vrrp4-%d"
 
 var state map[uint64]Node
@@ -116,7 +112,7 @@ func ToggleProtodown(interfaceName string, protodown bool) error {
 	//return nil
 }
 
-func Listen(ctx context.Context, ownUid uint64, assigner *Assigner) {
+func Listen(ctx context.Context, assigner *Assigner) {
 	conn, err := net.ListenUDP("udp", &net.UDPAddr{
 		Port: Port,
 		IP:   net.ParseIP(BroadcastAddr),
@@ -157,18 +153,18 @@ func Listen(ctx context.Context, ownUid uint64, assigner *Assigner) {
 			LastSeen: time.Now(),
 		}
 		stateLock.Unlock()
-		assigner.Assign(ownUid)
+		assigner.Assign()
 	}
 }
 
-func Advertise(ctx context.Context, Uid uint64) {
+func Advertise(ctx context.Context) {
 	raddr := &net.UDPAddr{
 		IP:   net.ParseIP(BroadcastAddr),
 		Port: Port,
 	}
 
 	bytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(bytes, Uid)
+	binary.BigEndian.PutUint64(bytes, *ownUid)
 
 	ticker := time.NewTicker(AdvertisementInterval)
 	defer ticker.Stop()
@@ -199,7 +195,7 @@ func Advertise(ctx context.Context, Uid uint64) {
 	}
 }
 
-func PutSelf(ctx context.Context, uid uint64) {
+func PutSelf(ctx context.Context) {
 	ticker := time.NewTicker(AdvertisementInterval)
 	defer ticker.Stop()
 	for {
@@ -208,7 +204,7 @@ func PutSelf(ctx context.Context, uid uint64) {
 			return
 		case <-ticker.C:
 			stateLock.Lock()
-			state[uid] = Node{Uid: uid, LastSeen: time.Now()}
+			state[*ownUid] = Node{Uid: *ownUid, LastSeen: time.Now()}
 			stateLock.Unlock()
 		}
 	}
@@ -227,7 +223,7 @@ func Assignee(nodes []uint64, vni uint64) uint64 {
 	return maxNode
 }
 
-func (a *Assigner) Assign(uid uint64) {
+func (a *Assigner) Assign() {
 	// listen first, then start assigning
 	if time.Now().Sub(programStart) < 3*AdvertisementInterval {
 		return
@@ -240,8 +236,8 @@ func (a *Assigner) Assign(uid uint64) {
 		return
 	}
 	vnis := make(map[uint64]struct{})
-	for i := MinVni; i <= MaxVni; i++ {
-		if Assignee(nodes, i) == uid {
+	for i := *minVni; i <= *maxVni; i++ {
+		if Assignee(nodes, i) == *ownUid {
 			if _, ok := a.PrevVnis[i]; !ok {
 				log.Info().Uint64("vni", i).Msg("assigning")
 				err := ToggleProtodown(fmt.Sprintf(InterfacePattern, i), false)
@@ -283,7 +279,7 @@ func Nodes() []uint64 {
 	return nodes
 }
 
-func ReassignOnExpiry(ctx context.Context, uid uint64, assigner *Assigner) {
+func ReassignOnExpiry(ctx context.Context, assigner *Assigner) {
 	for {
 		nextWakeup := AdvertisementInterval
 		stateLock.Lock()
@@ -298,7 +294,7 @@ func ReassignOnExpiry(ctx context.Context, uid uint64, assigner *Assigner) {
 		case <-ctx.Done():
 			return
 		case <-time.After(nextWakeup):
-			assigner.Assign(uid)
+			assigner.Assign()
 		}
 	}
 }
@@ -342,7 +338,7 @@ func SendGratuitousArp(vni uint64) error {
 	return nil
 }
 
-func PeriodicArp(ctx context.Context, uid uint64) {
+func PeriodicArp(ctx context.Context) {
 	ticker := time.NewTicker(ArpInterval)
 	defer ticker.Stop()
 	for {
@@ -351,8 +347,8 @@ func PeriodicArp(ctx context.Context, uid uint64) {
 			return
 		case <-ticker.C:
 			nodes := Nodes()
-			for i := MinVni; i <= MaxVni; i++ {
-				if Assignee(nodes, i) == uid {
+			for i := *minVni; i <= *maxVni; i++ {
+				if Assignee(nodes, i) == *ownUid {
 					err := SendGratuitousArp(i)
 					if err != nil {
 						log.Error().Err(err).Msg("failed to send gratuitous arp")
@@ -362,6 +358,10 @@ func PeriodicArp(ctx context.Context, uid uint64) {
 		}
 	}
 }
+
+var ownUid = flag.Uint64("uid", 0, "unique identifier for this node")
+var minVni = flag.Uint64("minvni", 1, "minimum vni to assign")
+var maxVni = flag.Uint64("maxvni", 100, "maximum vni to assign")
 
 func main() {
 	fileInfo, err := os.Stderr.Stat()
@@ -374,12 +374,9 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	uidArg := flag.Uint64("uid", 0, "unique identifier for this node")
 	flag.Parse()
-
-	uid := rand.Uint64()
-	if *uidArg != 0 {
-		uid = *uidArg
+	if *ownUid == 0 {
+		*ownUid = rand.Uint64()
 	}
 
 	state = make(map[uint64]Node)
@@ -389,7 +386,7 @@ func main() {
 		PrevVnis: make(map[uint64]struct{}),
 	}
 
-	for i := MinVni; i <= MaxVni; i++ {
+	for i := *minVni; i <= *maxVni; i++ {
 		err = ToggleProtodown(fmt.Sprintf(InterfacePattern, i), true)
 		if err != nil {
 			log.Fatal().Err(err).Msg("failed to toggle initial protodown")
@@ -398,18 +395,18 @@ func main() {
 
 	programStart = time.Now()
 
-	go PutSelf(ctx, uid)
-	go Advertise(ctx, uid)
-	go Listen(ctx, uid, assigner)
-	go ReassignOnExpiry(ctx, uid, assigner)
-	go PeriodicArp(ctx, uid)
+	go PutSelf(ctx)
+	go Advertise(ctx)
+	go Listen(ctx, assigner)
+	go ReassignOnExpiry(ctx, assigner)
+	go PeriodicArp(ctx)
 
 	c := make(chan os.Signal)
 	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
 	<-c
 	cancel()
 	time.Sleep(3 * AdvertisementInterval)
-	for i := MinVni; i <= MaxVni; i++ {
+	for i := *minVni; i <= *maxVni; i++ {
 		err = ToggleProtodown(fmt.Sprintf(InterfacePattern, i), false)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to toggle protodown")
