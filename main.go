@@ -399,4 +399,12 @@ func main() {
 	c := make(chan os.Signal)
 	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
 	<-c
+	cancel()
+	time.Sleep(3 * AdvertisementInterval)
+	for i := MinVni; i <= MaxVni; i++ {
+		err = ToggleProtodown(fmt.Sprintf(InterfacePattern, i), false)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to toggle protodown")
+		}
+	}
 }
