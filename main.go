@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/binary"
+	"flag"
 	"fmt"
 	"github.com/pkg/errors"
 	"github.com/rgwohlbold/arp"
@@ -373,7 +374,14 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	uidArg := flag.Uint64("uid", 0, "unique identifier for this node")
+	flag.Parse()
+
 	uid := rand.Uint64()
+	if *uidArg != 0 {
+		uid = *uidArg
+	}
+
 	state = make(map[uint64]Node)
 
 	assigner := &Assigner{
