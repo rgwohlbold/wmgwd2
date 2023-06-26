@@ -76,41 +76,41 @@ func ToggleProtodown(interfaceName string, protodown bool) error {
 	if protodown && msg.Attributes.OperationalState == rtnetlink.OperStateDown || !protodown && msg.Attributes.OperationalState == rtnetlink.OperStateUp {
 		return nil
 	}
-	flags := uint32(0)
-	if !protodown {
-		flags = 1
-	}
-
-	err = nlConn.Link.Set(&rtnetlink.LinkMessage{
-		Family: 0,
-		Type:   msg.Type,
-		Index:  uint32(iface.Index),
-		Flags:  flags,
-		Change: 1,
-	})
-	if err != nil {
-		nlConn.Close()
-		nlConn = nil
-		return errors.Wrap(err, "failed to set link")
-	}
-	return nil
-
-	//res := uint8(0)
-	//if protodown {
-	//	res = uint8(1)
+	//flags := uint32(0)
+	//if !protodown {
+	//	flags = 1
 	//}
 
 	//err = nlConn.Link.Set(&rtnetlink.LinkMessage{
-	//	Index: msg.Index,
-	//	Attributes: &rtnetlink.LinkAttributes{
-	//		ProtoDown: &res,
-	//	}})
+	//	Family: 0,
+	//	Type:   msg.Type,
+	//	Index:  uint32(iface.Index),
+	//	Flags:  flags,
+	//	Change: 1,
+	//})
 	//if err != nil {
 	//	nlConn.Close()
 	//	nlConn = nil
 	//	return errors.Wrap(err, "failed to set link")
 	//}
 	//return nil
+
+	res := uint8(0)
+	if protodown {
+		res = uint8(1)
+	}
+
+	err = nlConn.Link.Set(&rtnetlink.LinkMessage{
+		Index: msg.Index,
+		Attributes: &rtnetlink.LinkAttributes{
+			ProtoDown: &res,
+		}})
+	if err != nil {
+		nlConn.Close()
+		nlConn = nil
+		return errors.Wrap(err, "failed to set link")
+	}
+	return nil
 }
 
 func Listen(ctx context.Context, assigner *Assigner) {
