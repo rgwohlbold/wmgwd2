@@ -54,6 +54,7 @@ func murmur64(key uint64) uint64 {
 }
 
 func ToggleProtodown(interfaceName string, protodown bool) error {
+	log.Debug().Msgf("ToggleProtodown(%s, %v)", interfaceName, protodown)
 	iface, err := net.InterfaceByName(interfaceName)
 	if err != nil {
 		return errors.Wrap(err, fmt.Sprintf("failed to get interface %s", interfaceName))
