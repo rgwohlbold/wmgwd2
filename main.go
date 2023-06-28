@@ -224,6 +224,17 @@ func Assignee(nodes []uint64, vni uint64) uint64 {
 	return maxNode
 }
 
+func ShuffleVnis() []uint64 {
+	vnis := make([]uint64, *maxVni-*minVni+1)
+	for i := *minVni; i <= *maxVni; i++ {
+		vnis[i-*minVni] = uint64(i)
+	}
+	rand.Shuffle(len(vnis), func(i, j int) {
+		vnis[i], vnis[j] = vnis[j], vnis[i]
+	})
+	return vnis
+}
+
 func (a *Assigner) Assign() {
 	// listen first, then start assigning
 	if time.Now().Sub(programStart) < 3*AdvertisementInterval {
@@ -237,7 +248,7 @@ func (a *Assigner) Assign() {
 		return
 	}
 	vnis := make(map[uint64]struct{})
-	for i := *minVni; i <= *maxVni; i++ {
+	for _, i := range ShuffleVnis() {
 		if Assignee(nodes, i) == *ownUid {
 			if _, ok := a.PrevVnis[i]; !ok {
 				log.Info().Uint64("vni", i).Msg("assigning")
@@ -348,7 +359,7 @@ func PeriodicArp(ctx context.Context) {
 			return
 		case <-ticker.C:
 			nodes := Nodes()
-			for i := *minVni; i <= *maxVni; i++ {
+			for _, i := range ShuffleVnis() {
 				if Assignee(nodes, i) == *ownUid {
 					err := SendGratuitousArp(i)
 					if err != nil {
